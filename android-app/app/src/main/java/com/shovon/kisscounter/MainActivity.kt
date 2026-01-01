@@ -19,26 +19,28 @@ import kotlin.math.abs
 class MainActivity : AppCompatActivity() {
 
     private lateinit var interpreter: Interpreter
-
     private lateinit var audioRecord: AudioRecord
     private var isRecording = false
 
     private val AUDIO_PERMISSION_CODE = 1001
     private val SAMPLE_RATE = 16000
 
+    // ---- SOUND EVENT PARAMETERS ----
+    private val SOUND_THRESHOLD = 600.0
+    private val COOLDOWN_MS = 800
+    private var lastEventTime = 0L
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(android.R.layout.simple_list_item_1)
 
-        // Load TFLite model
         interpreter = loadModel()
         Log.d("KISS_COUNTER", "Model loaded successfully")
 
-        // Request microphone permission
         checkAudioPermission()
     }
 
-    // ---------------- MODEL LOADING ----------------
+    // ---------------- MODEL ----------------
 
     private fun loadModel(): Interpreter {
         val assetFileDescriptor = assets.openFd("kiss_model.tflite")
@@ -70,7 +72,6 @@ class MainActivity : AppCompatActivity() {
                 AUDIO_PERMISSION_CODE
             )
         } else {
-            Log.d("KISS_COUNTER", "Microphone permission already granted")
             startAudioCapture()
         }
     }
@@ -82,19 +83,15 @@ class MainActivity : AppCompatActivity() {
     ) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
 
-        if (requestCode == AUDIO_PERMISSION_CODE) {
-            if (grantResults.isNotEmpty() &&
-                grantResults[0] == PackageManager.PERMISSION_GRANTED
-            ) {
-                Log.d("KISS_COUNTER", "Microphone permission granted by user")
-                startAudioCapture()
-            } else {
-                Log.d("KISS_COUNTER", "Microphone permission denied")
-            }
+        if (requestCode == AUDIO_PERMISSION_CODE &&
+            grantResults.isNotEmpty() &&
+            grantResults[0] == PackageManager.PERMISSION_GRANTED
+        ) {
+            startAudioCapture()
         }
     }
 
-    // ---------------- AUDIO CAPTURE ----------------
+    // ---------------- AUDIO ----------------
 
     private fun startAudioCapture() {
         val bufferSize = AudioRecord.getMinBufferSize(
@@ -125,8 +122,16 @@ class MainActivity : AppCompatActivity() {
                     for (i in 0 until read) {
                         sum += abs(buffer[i].toInt())
                     }
+
                     val amplitude = sum / read
-                    Log.d("KISS_COUNTER", "Audio amplitude: $amplitude")
+                    val now = System.currentTimeMillis()
+
+                    if (amplitude > SOUND_THRESHOLD &&
+                        now - lastEventTime > COOLDOWN_MS
+                    ) {
+                        lastEventTime = now
+                        Log.d("KISS_COUNTER", "🔊 Sound event detected!")
+                    }
                 }
             }
         }.start()
