@@ -15,6 +15,7 @@ import java.io.FileInputStream
 import java.nio.MappedByteBuffer
 import java.nio.channels.FileChannel
 import kotlin.math.abs
+import kotlin.math.sqrt
 
 class MainActivity : AppCompatActivity() {
 
@@ -24,18 +25,16 @@ class MainActivity : AppCompatActivity() {
 
     private val AUDIO_PERMISSION_CODE = 1001
     private val SAMPLE_RATE = 16000
-
-    // ---- SOUND EVENT PARAMETERS ----
-    private val SOUND_THRESHOLD = 600.0
-    private val COOLDOWN_MS = 800
-    private var lastEventTime = 0L
+    private val WINDOW_SIZE = 8000        // ~0.5 sec
+    private val KISS_THRESHOLD = 0.7f
+    private var kissCount = 0
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(android.R.layout.simple_list_item_1)
 
         interpreter = loadModel()
-        Log.d("KISS_COUNTER", "Model loaded successfully")
+        Log.d("KISS_COUNTER", "Model loaded")
 
         checkAudioPermission()
     }
@@ -43,18 +42,14 @@ class MainActivity : AppCompatActivity() {
     // ---------------- MODEL ----------------
 
     private fun loadModel(): Interpreter {
-        val assetFileDescriptor = assets.openFd("kiss_model.tflite")
-        val inputStream = FileInputStream(assetFileDescriptor.fileDescriptor)
+        val afd = assets.openFd("kiss_model.tflite")
+        val inputStream = FileInputStream(afd.fileDescriptor)
         val fileChannel = inputStream.channel
-        val startOffset = assetFileDescriptor.startOffset
-        val declaredLength = assetFileDescriptor.declaredLength
-
         val modelBuffer: MappedByteBuffer = fileChannel.map(
             FileChannel.MapMode.READ_ONLY,
-            startOffset,
-            declaredLength
+            afd.startOffset,
+            afd.declaredLength
         )
-
         return Interpreter(modelBuffer)
     }
 
@@ -91,7 +86,7 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    // ---------------- AUDIO ----------------
+    // ---------------- AUDIO + ML ----------------
 
     private fun startAudioCapture() {
         val bufferSize = AudioRecord.getMinBufferSize(
@@ -112,29 +107,62 @@ class MainActivity : AppCompatActivity() {
         isRecording = true
 
         Thread {
-            val buffer = ShortArray(bufferSize)
+            val audioBuffer = ShortArray(WINDOW_SIZE)
 
             while (isRecording) {
-                val read = audioRecord.read(buffer, 0, buffer.size)
+                val read = audioRecord.read(audioBuffer, 0, audioBuffer.size)
+                if (read == WINDOW_SIZE) {
+                    val features = extractFeatures(audioBuffer)
+                    val prediction = runInference(features)
 
-                if (read > 0) {
-                    var sum = 0.0
-                    for (i in 0 until read) {
-                        sum += abs(buffer[i].toInt())
-                    }
-
-                    val amplitude = sum / read
-                    val now = System.currentTimeMillis()
-
-                    if (amplitude > SOUND_THRESHOLD &&
-                        now - lastEventTime > COOLDOWN_MS
-                    ) {
-                        lastEventTime = now
-                        Log.d("KISS_COUNTER", "🔊 Sound event detected!")
+                    if (prediction > KISS_THRESHOLD) {
+                        kissCount++
+                        Log.d(
+                            "KISS_COUNTER",
+                            "💋 Kiss detected! Score=$prediction  Count=$kissCount"
+                        )
                     }
                 }
             }
         }.start()
+    }
+
+    // ---------------- FEATURE EXTRACTION ----------------
+    // Lightweight RMS-energy based feature (stable & fast)
+
+    private fun extractFeatures(buffer: ShortArray): Array<Array<Array<FloatArray>>> {
+        val rms = FloatArray(39)
+        val chunk = buffer.size / rms.size
+
+        for (i in rms.indices) {
+            var sum = 0.0
+            for (j in 0 until chunk) {
+                val v = buffer[i * chunk + j].toFloat()
+                sum += v * v
+            }
+            rms[i] = sqrt(sum / chunk).toFloat() / 32768f
+        }
+
+        // Shape: [1][50][39][1] (pad time dimension)
+        val input = Array(1) {
+            Array(50) {
+                Array(39) { FloatArray(1) }
+            }
+        }
+
+        for (t in 0 until 39) {
+            input[0][t][t][0] = rms[t]
+        }
+
+        return input
+    }
+
+    // ---------------- INFERENCE ----------------
+
+    private fun runInference(input: Array<Array<Array<FloatArray>>>): Float {
+        val output = Array(1) { FloatArray(1) }
+        interpreter.run(input, output)
+        return output[0][0]
     }
 
     // ---------------- CLEANUP ----------------
