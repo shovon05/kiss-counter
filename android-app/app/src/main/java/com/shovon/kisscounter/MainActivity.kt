@@ -2,33 +2,29 @@ package com.shovon.kisscounter
 
 import android.Manifest
 import android.content.pm.PackageManager
-import android.media.AudioFormat
-import android.media.AudioRecord
-import android.media.MediaRecorder
 import android.os.Bundle
-import android.util.Log
 import android.view.Gravity
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import org.tensorflow.lite.Interpreter
+import org.tensorflow.lite.task.audio.AudioRecord
+import org.tensorflow.lite.task.audio.TensorAudio
 import java.io.FileInputStream
 import java.nio.MappedByteBuffer
 import java.nio.channels.FileChannel
-import kotlin.math.sqrt
 
 class MainActivity : AppCompatActivity() {
 
     private lateinit var interpreter: Interpreter
     private lateinit var audioRecord: AudioRecord
-    private var isRecording = false
+    private lateinit var tensorAudio: TensorAudio
 
     private lateinit var counterText: TextView
 
     private val AUDIO_PERMISSION_CODE = 1001
     private val SAMPLE_RATE = 16000
-    private val WINDOW_SIZE = 8000
     private val KISS_THRESHOLD = 0.7f
 
     private var kissCount = 0
@@ -36,7 +32,7 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // -------- UI --------
+        // UI
         counterText = TextView(this).apply {
             text = "💋 Kisses: 0"
             textSize = 28f
@@ -44,11 +40,9 @@ class MainActivity : AppCompatActivity() {
         }
         setContentView(counterText)
 
-        // -------- MODEL --------
         interpreter = loadModel()
-        Log.d("KISS_COUNTER", "Model loaded")
+        tensorAudio = TensorAudio.create(interpreter)
 
-        // -------- PERMISSION --------
         checkAudioPermission()
     }
 
@@ -66,7 +60,7 @@ class MainActivity : AppCompatActivity() {
         return Interpreter(modelBuffer)
     }
 
-    // ---------------- PERMISSIONS ----------------
+    // ---------------- PERMISSION ----------------
 
     private fun checkAudioPermission() {
         if (ContextCompat.checkSelfPermission(
@@ -80,7 +74,7 @@ class MainActivity : AppCompatActivity() {
                 AUDIO_PERMISSION_CODE
             )
         } else {
-            startAudioCapture()
+            startAudio()
         }
     }
 
@@ -89,104 +83,44 @@ class MainActivity : AppCompatActivity() {
         permissions: Array<out String>,
         grantResults: IntArray
     ) {
-        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-
         if (requestCode == AUDIO_PERMISSION_CODE &&
             grantResults.isNotEmpty() &&
             grantResults[0] == PackageManager.PERMISSION_GRANTED
         ) {
-            startAudioCapture()
+            startAudio()
         }
     }
 
-    // ---------------- AUDIO + ML ----------------
+    // ---------------- AUDIO + MFCC ----------------
 
-    private fun startAudioCapture() {
-        val bufferSize = AudioRecord.getMinBufferSize(
+    private fun startAudio() {
+        val audioFormat = AudioRecord.createAudioFormat(
             SAMPLE_RATE,
-            AudioFormat.CHANNEL_IN_MONO,
-            AudioFormat.ENCODING_PCM_16BIT
+            1
         )
 
-        audioRecord = AudioRecord(
-            MediaRecorder.AudioSource.MIC,
-            SAMPLE_RATE,
-            AudioFormat.CHANNEL_IN_MONO,
-            AudioFormat.ENCODING_PCM_16BIT,
-            bufferSize
+        val recordConfig = AudioRecord.createRecordConfig(
+            audioFormat,
+            0.5f
         )
 
+        audioRecord = AudioRecord.createAudioRecord(recordConfig)
         audioRecord.startRecording()
-        isRecording = true
 
         Thread {
-            val audioBuffer = ShortArray(WINDOW_SIZE)
+            while (true) {
+                tensorAudio.load(audioRecord)
+                val output = Array(1) { FloatArray(1) }
+                interpreter.run(tensorAudio.tensorBuffer.buffer, output)
 
-            while (isRecording) {
-                val read = audioRecord.read(audioBuffer, 0, audioBuffer.size)
-                if (read == WINDOW_SIZE) {
-                    val features = extractFeatures(audioBuffer)
-                    val score = runInference(features)
-
-                    if (score > KISS_THRESHOLD) {
-                        kissCount++
-                        runOnUiThread {
-                            counterText.text = "💋 Kisses: $kissCount"
-                        }
-                        Log.d(
-                            "KISS_COUNTER",
-                            "Kiss detected! score=$score count=$kissCount"
-                        )
+                val score = output[0][0]
+                if (score > KISS_THRESHOLD) {
+                    kissCount++
+                    runOnUiThread {
+                        counterText.text = "💋 Kisses: $kissCount"
                     }
                 }
             }
         }.start()
-    }
-
-    // ---------------- FEATURES ----------------
-
-    private fun extractFeatures(buffer: ShortArray): Array<Array<Array<FloatArray>>> {
-        val rms = FloatArray(39)
-        val chunk = buffer.size / rms.size
-
-        for (i in rms.indices) {
-            var sum = 0.0
-            for (j in 0 until chunk) {
-                val v = buffer[i * chunk + j].toFloat()
-                sum += v * v
-            }
-            rms[i] = sqrt(sum / chunk).toFloat() / 32768f
-        }
-
-        val input = Array(1) {
-            Array(50) {
-                Array(39) { FloatArray(1) }
-            }
-        }
-
-        for (i in rms.indices) {
-            input[0][i][i][0] = rms[i]
-        }
-
-        return input
-    }
-
-    // ---------------- INFERENCE ----------------
-
-    private fun runInference(input: Array<Array<Array<FloatArray>>>): Float {
-        val output = Array(1) { FloatArray(1) }
-        interpreter.run(input, output)
-        return output[0][0]
-    }
-
-    // ---------------- CLEANUP ----------------
-
-    override fun onDestroy() {
-        super.onDestroy()
-        if (isRecording) {
-            isRecording = false
-            audioRecord.stop()
-            audioRecord.release()
-        }
     }
 }
