@@ -7,6 +7,8 @@ import android.media.AudioRecord
 import android.media.MediaRecorder
 import android.os.Bundle
 import android.util.Log
+import android.view.Gravity
+import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
@@ -14,7 +16,6 @@ import org.tensorflow.lite.Interpreter
 import java.io.FileInputStream
 import java.nio.MappedByteBuffer
 import java.nio.channels.FileChannel
-import kotlin.math.abs
 import kotlin.math.sqrt
 
 class MainActivity : AppCompatActivity() {
@@ -23,19 +24,31 @@ class MainActivity : AppCompatActivity() {
     private lateinit var audioRecord: AudioRecord
     private var isRecording = false
 
+    private lateinit var counterText: TextView
+
     private val AUDIO_PERMISSION_CODE = 1001
     private val SAMPLE_RATE = 16000
-    private val WINDOW_SIZE = 8000        // ~0.5 sec
+    private val WINDOW_SIZE = 8000
     private val KISS_THRESHOLD = 0.7f
+
     private var kissCount = 0
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContentView(android.R.layout.simple_list_item_1)
 
+        // -------- UI --------
+        counterText = TextView(this).apply {
+            text = "💋 Kisses: 0"
+            textSize = 28f
+            gravity = Gravity.CENTER
+        }
+        setContentView(counterText)
+
+        // -------- MODEL --------
         interpreter = loadModel()
         Log.d("KISS_COUNTER", "Model loaded")
 
+        // -------- PERMISSION --------
         checkAudioPermission()
     }
 
@@ -113,13 +126,16 @@ class MainActivity : AppCompatActivity() {
                 val read = audioRecord.read(audioBuffer, 0, audioBuffer.size)
                 if (read == WINDOW_SIZE) {
                     val features = extractFeatures(audioBuffer)
-                    val prediction = runInference(features)
+                    val score = runInference(features)
 
-                    if (prediction > KISS_THRESHOLD) {
+                    if (score > KISS_THRESHOLD) {
                         kissCount++
+                        runOnUiThread {
+                            counterText.text = "💋 Kisses: $kissCount"
+                        }
                         Log.d(
                             "KISS_COUNTER",
-                            "💋 Kiss detected! Score=$prediction  Count=$kissCount"
+                            "Kiss detected! score=$score count=$kissCount"
                         )
                     }
                 }
@@ -127,8 +143,7 @@ class MainActivity : AppCompatActivity() {
         }.start()
     }
 
-    // ---------------- FEATURE EXTRACTION ----------------
-    // Lightweight RMS-energy based feature (stable & fast)
+    // ---------------- FEATURES ----------------
 
     private fun extractFeatures(buffer: ShortArray): Array<Array<Array<FloatArray>>> {
         val rms = FloatArray(39)
@@ -143,15 +158,14 @@ class MainActivity : AppCompatActivity() {
             rms[i] = sqrt(sum / chunk).toFloat() / 32768f
         }
 
-        // Shape: [1][50][39][1] (pad time dimension)
         val input = Array(1) {
             Array(50) {
                 Array(39) { FloatArray(1) }
             }
         }
 
-        for (t in 0 until 39) {
-            input[0][t][t][0] = rms[t]
+        for (i in rms.indices) {
+            input[0][i][i][0] = rms[i]
         }
 
         return input
