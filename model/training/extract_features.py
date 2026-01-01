@@ -97,5 +97,24 @@ def process_dataset():
 
 if __name__ == "__main__":
     X, y = process_dataset()
-    print("Feature shape:", X.shape)
-    print("Labels shape:", y.shape)
+
+    # 1. Compute mean and standard deviation
+    mean = X.mean(axis=(0, 1), keepdims=True)
+    std = X.std(axis=(0, 1), keepdims=True) + 1e-8
+
+    # 2. Normalize features
+    X_normalized = (X - mean) / std
+
+    # 3. Save everything
+    os.makedirs("../processed", exist_ok=True)
+    np.savez(
+        "../processed/kiss_dataset.npz",
+        X=X_normalized,
+        y=y,
+        mean=mean,
+        std=std
+    )
+
+    print("Dataset saved successfully")
+    print("X shape:", X_normalized.shape)
+    print("y shape:", y.shape)
