@@ -3,6 +3,7 @@ package com.shovon.kisscounter
 import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Bundle
+import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
@@ -12,17 +13,30 @@ import core.SimpleKissEngine
 class MainActivity : AppCompatActivity() {
 
     private lateinit var engine: SimpleKissEngine
+    private lateinit var kissCountText: TextView
+
+    private var kissCount = 0
 
     private val AUDIO_PERMISSION_CODE = 1001
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
+        // Attach UI
+        setContentView(R.layout.activity_main)
+        kissCountText = findViewById(R.id.kissCountText)
+        kissCountText.text = "Kisses: 0"
+
+        // Create engine
         val audioSource = AndroidAudioInputSource()
         engine = SimpleKissEngine(audioSource)
 
+        // Listen for kiss events
         engine.setOnKissDetectedListener {
-            println("Kiss detected on Android")
+            kissCount++
+            runOnUiThread {
+                kissCountText.text = "Kisses: $kissCount"
+            }
         }
 
         checkAudioPermission()
@@ -51,15 +65,11 @@ class MainActivity : AppCompatActivity() {
     ) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
 
-        if (requestCode == AUDIO_PERMISSION_CODE) {
-            if (grantResults.isNotEmpty() &&
-                grantResults[0] == PackageManager.PERMISSION_GRANTED
-            ) {
-                engine.start()
-            } else {
-                // Permission denied — engine must not run
-                println("Microphone permission denied")
-            }
+        if (requestCode == AUDIO_PERMISSION_CODE &&
+            grantResults.isNotEmpty() &&
+            grantResults[0] == PackageManager.PERMISSION_GRANTED
+        ) {
+            engine.start()
         }
     }
 
