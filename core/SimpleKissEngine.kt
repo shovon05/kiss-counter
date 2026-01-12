@@ -40,19 +40,17 @@ class SimpleKissEngine(
     }
 
     private fun processFrame(frame: FloatArray) {
-        if (state != EngineState.RUNNING) return
+    if (state != EngineState.RUNNING) return
 
-        val avgAmplitude =
-            frame.map { abs(it) }.average().toFloat()
-
-        if (avgAmplitude > THRESHOLD) {
-            kissCount++
-            listener?.invoke(
-                KissEvent(
-                    timestampMillis = System.currentTimeMillis(),
-                    confidence = avgAmplitude
-                )
+    if (detector.analyze(frame)) {
+        kissCount++
+        listener?.invoke(
+            KissEvent(
+                timestampMillis = System.currentTimeMillis(),
+                confidence = 1.0f
             )
-        }
+        )
     }
+}
+
 }
