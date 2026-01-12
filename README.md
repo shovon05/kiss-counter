@@ -1,28 +1,12 @@
-# Kiss Counter 🎧❤️
+# Kiss Counter 💋
 
-An Android application that detects kiss-like acoustic patterns
-from live microphone input and counts occurrences in real time.
+This repository is a clean rebuild of an Android-based
+on-device audio event counter.
 
-## Motivation
-This project explores real-time audio signal processing and
-on-device machine learning for sound event detection.
+The goal is to create a reusable **core engine** that detects
+kiss-like acoustic events from microphone input and counts
+them reliably, independent of UI.
 
-## Core Features (MVP)
-- Live microphone input processing
-- Acoustic feature extraction (MFCC)
-- Lightweight ML-based sound classification
-- Kiss event counter (local only)
+🚧 Status: Active rebuild (step-by-step, clean slate)
 
-## Tech Stack
-- Android (Kotlin)
-- AudioRecord API
-- TensorFlow Lite
-- Python (model training)
-
-## Privacy
-- No audio is recorded or stored
-- All processing happens on-device
-- Only acoustic features are analyzed
-
-## Status
-🚧 Planning & Dataset Preparation
+More details will be added incrementally.
