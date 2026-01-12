@@ -1,0 +1,1 @@
+fun simulateKiss(confidence: Float)
